@@ -102,7 +102,7 @@ To introduce the idea let's look at `glue`. It is a function to create strings s
 
 ```{r}
 name <- "Adam"
-glue("Hi my name is {name}")
+glue::glue("Hi my name is {name}")
 ```
 The characters in the curly braces are interpreted differently than the other characters. The braces tell the glue function to **unquote** (i.e. evaluate) whatever is inside.
 
