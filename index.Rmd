@@ -1,0 +1,379 @@
+---
+title: "Exploring some advanced R programming concepts with dplyr"
+author: "Adam Black"
+date: "`r Sys.Date()`"
+output:
+  prettydoc::html_pretty:
+    theme: flatly
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, cache = T, warning = F)
+```
+
+The dplyr package has become a preferred tool for data manipulation for many R users. There are two really innovative ideas implemented by the dplyr package that are making their way into other packages.
+
+### Small composable funtions (verbs)
+
+`dplyr` provides a handful of verbs that serve as a language of data manipulation. Each verb is function that does one thing to a dataset and does it very well. Examples are `select`, `filter`, `mutate`, `group_by`, and `summarise`. Other packages being developed in the tidyverse philosphy are adopting this strategy. For example the [tidygraph](https://github.com/thomasp85/tidygraph) package provides verbs similar to dplyr for working with graph data and the [plyranges](https://sa-lee.github.io/plyranges/) package provides verbs for working with genomics data. The underlying object is different in each case but the style of mainpulating the objects by composing verbs with pipes is used by each of these packages.
+
+
+
+### Abstracting away the back end and delaying computation
+
+One of the more fantastic things about `dplyr` is that it abstracts away where the data is stored. Your data can be an dataframe in memory, a table in pretty much any SQL database, or even an object in Apache Spark. In all cases the `dplyr` code is the same. Futhermore `dplyr` delays computation until the last possible moment so running `dplyr` code on a database amounts to building up the recipe to get the results you want. The recipe is not executed until the user explicitly asks for the result. For computations on large datasets this can be a really nice feature. I think the `hailr` package (in-development) for parallelized analysis of genomics data will implement this idea as well.
+
+
+*****
+
+
+In this post we will take trip down the rabbit hole of extending `dplyr` by creating a function we can use in a pipeline to solve a data cleaning problem. In the process we will explore some advanced programming concepts in R and learn some powerful techniques for extending `dplyr`.
+
+
+
+# Problem statement
+
+Sueppose you have a table in a database containing information about some type of entity but it is a bit messy. Each entity has a unique id and some associated attributes all stored in a single table. The trouble is that this data is not normalized. By that I mean that while each entity sould have only one value for each attribute it often happens that there are multiple values in the data, spread across multiple rows. Furthermore there is a lot of missing data in the form of `NA`s or empty strings. Our goal is to normalize the data so that the attribute columns have a consistant value across id. We also want to keep the data in the database since it is very large.
+
+Let's create some fake data to play with and load it into a postgres database.
+
+```{r}
+library(dplyr)
+
+df <- tibble::tribble(
+  ~id, ~letter, ~number,
+  1, "a",  NA,
+  1, "a", "1",
+  1,  "", "1",
+  1,  "",  NA,
+  1, "b",  NA,
+  2, "c", "9",
+  2,  NA,  NA)
+
+library(RPostgreSQL)
+con <- DBI::dbConnect(DBI::dbDriver("PostgreSQL"), dbname = "postgres",
+                 host = "localhost", port = 5432,
+                 user = "postgres", password = keyring::key_get(service = "postgres", username = "postgres"))
+
+db <- copy_to(con, df)
+db
+```
+
+This data contains two entity ids and two attributes. As you can see this data is messy. Lets assume that each entity should be associated with one and only one value for each attribute. There are multiple ways we could normalize this data but we would like to write a function that will assign the most frequently occuring non-missing (blank or NA) value of each attribute to each entity. This is basically a *mode* function applied to each column within `id`. *Mode* is generally not available in SQL databases and is not actually well defined since there may be ties. We will apply the *"Don't let the perfect be the enemy of the good"* rule and ignore that problem for now. Furthermore we don't want to actually collapse the data since there may be more manipulations we want to perform and some other variables that we do not want to summarise.
+
+
+The desired solution looks like this.
+```{r}
+source("variable_consistancy.R")
+db %>% 
+  make_consistant(across = "id", letter, number)
+```
+
+# The basic strategy
+The basic strategy behind this function is to define a temp variable for each column we want to clean up. This temp variable will contain the count of the number of occurances of each value within `id`. It looks like this.
+
+```{r}
+db2 <- db %>%
+  group_by(id, letter) %>% 
+  mutate(letter_count = ifelse(is.na(letter) | letter == "", 0, n())) %>% 
+  group_by(id, number) %>% 
+  mutate(number_count = ifelse(is.na(number) | number == "", 0, n())) %>% 
+  group_by(id) %>% 
+  mutate(new_letter = first(letter, order_by = desc(letter_count)), 
+         new_number = first(number, order_by = desc(number_count)))
+
+db2
+```
+
+`db2` actually contains the recipe for how to get the result. Since the data is in a postgres database this recipe is postgres SQL code.
+```{r}
+show_query(db2)
+```
+
+
+To get our desired result we just need to drop the temporary columns and overwrite the old data with the new data. However this only solves our problem in this specific case and we would like a function that we can throw into any `dplyr` pipeline.
+
+# Concepts
+
+To encapsulate this logic into into a function we will need to introduce a few R programming concepts. The first is programming with dplyr which involves the idea of unquoting. If you are new to this idea you should read the (vignette)[https://cran.r-project.org/web/packages/dplyr/vignettes/programming.html].
+
+## Non-standard evaluation
+To introduce the idea let's look at `glue`. It is a function to create strings similar to `paste` in base R.
+
+```{r}
+name <- "Adam"
+glue::glue("Hi my name is {name}")
+```
+The characters in the curly braces are interpreted differently than the other characters. The braces tell the glue function to **unquote** (i.e. evaluate) whatever is inside.
+
+```{r}
+glue::glue("The square root of pi is approximately {sqrt(pi)}")
+```
+
+In similar fashion we can build R expressions.
+```{r}
+four <- 4
+ten <- rlang::expr(1 + 2 + 3 + !!four)
+ten
+```
+The `!!` symbol acts similar to the `{}` in the glue function.
+
+Then we can manually evaluate an expression.
+```{r}
+rlang::eval_tidy(ten)
+```
+
+
+
+In R you can write functions that quote their arguments, capturing the expression and then evaluating it in a non-standard way. This gives R functions the ability to handle their arguments in any way they like. 
+
+```{r}
+x <- 1:4
+plot(x, x^2)
+```
+
+Notice the y axis is labeled x^2 which is the expression I passed in. The `plot` function quoted that input and used it to both calculate the y variable and label the y axis.
+
+
+`dplyr` uses this technique heavily to evaluate arguments like variable names in the context of the associated dataframe, generally passed in as the first argument of a verb function. 
+
+This `print_hello` function quotes its input similar to dplyr functions.
+```{r}
+print_hello <- function(name){
+  name <- rlang::enexpr(name)
+  glue::glue("Hello {name}")
+}
+
+print_hello(Dave)
+```
+
+
+Functions that quote their input are difficult to program with. The `!!` unquoting operator helps us get around the difficulties.
+
+Let's use `!!` to wrap our inital solution in a function.
+```{r}
+make_consistant <- function(df, var){
+  var <- rlang::enquo(var)
+  db %>%
+    group_by(id, !!var) %>% 
+    mutate(tmp_count = ifelse(is.na(!!var) | !!var == "", 0, n())) %>% 
+    ungroup() %>% 
+    group_by(id) %>% 
+    mutate(!!rlang::quo_name(var)  := first(!!var, order_by = desc(tmp_count))) %>% 
+    select(-tmp_count)
+}
+
+db %>% 
+  make_consistant(letter)
+
+```
+
+**Sidebar**: I will punt the discussion of quosures vs. expressions and `enquo` vs `enexpr` for now. The short explanation is that an expression is unevaluated R code. A quosure is an R expression that also contains information about the environment it should be evaluated in. `enexpr` can be used in a function to quote the input and create an expression while `enquo` does the same but creates a quosure instead. I think the rule of thumb is to generally prefer quosures over expressions but if your code works under your various test conditions then you might not need to worry about it too much. **End Sidebar**
+
+
+We sucessfully encapsulated our variable cleaning logic in a function. However this function only fixes one variable at a time.To handle multiple variables simultaneously we need a couple more new concepts.
+
+
+# Using ...
+The `...` (proonounced dot dot dot) argument is a handy way to let the user pass any number of arguments into your function. Any arguments that are not matched by name or position will match the `...` argument.
+
+Let's start exploring by print out structure of the `...` argument.
+```{r}
+dot_fun <- function(...){
+  str(list(...))
+}
+
+dot_fun("hi", "there", "everyone")
+```
+
+We can also quote the extra arguments and capture them in a list.
+```{r}
+dot_fun <- function(...){
+  str(rlang::exprs(...))
+}
+
+dot_fun(hi, there, everyone)
+```
+
+
+# Build a list with the pipe
+The pipe makes code more readable and can be used to build a list.
+```{r}
+list("a") %>% c("b") %>% c("c")
+```
+
+Lists can contain anything in R including steps of a `dplyr` pipeline.
+```{r}
+list(rlang::expr(db)) %>% 
+  c(rlang::expr(group_by(id))) %>% 
+  c(rlang::expr(mutate(letter = max(letter))))
+```
+
+
+We can use the `reduce` function in the `purrr` package to collapse our `dplyr` list into a single `dplyr` expression.
+```{r}
+dplyr_expr <- list(rlang::expr(df)) %>% 
+  c(rlang::expr(group_by(id))) %>% 
+  c(rlang::expr(mutate(letter = max(letter)))) %>% 
+  purrr::reduce(function(a, b){rlang::expr(!!a %>% !!b)})
+
+dplyr_expr
+```
+
+Then we can evaluate the dplyr expression.
+```{r}
+rlang::eval_tidy(dplyr_expr)
+```
+
+
+# Putting these ideas together
+For each variable change it to an "a".
+
+```{r}
+make_a <- function(df,  ...){ 
+  # save arguments as a quoted list
+  dots <- rlang::quos(...)
+  
+  # create replacement expressions assigning the letter a to each variable
+  replacement_expr <- purrr::map(dots, ~rlang::expr(!!rlang::quo_name(.x) := "a"))
+  
+  print(replacement_expr)
+
+  # create a dplyr pipline splicing in the replacement expressions
+  final_expr <- list(rlang::expr(df)) %>%
+    c(rlang::expr(group_by(id))) %>%
+    c(rlang::expr(mutate(!!!replacement_expr))) %>%
+    purrr::reduce(function(a,b) rlang::expr(!!a %>% !!b))
+  
+  print(final_expr)
+  
+  # return the evaluated dplyr pipeline
+  rlang::eval_tidy(final_expr)
+}
+
+make_a(db, letter, number)
+```
+
+
+
+Now instead of setting each variable to "a" we will set each to the most commonly occuring non-missing value within each `id`.
+
+```{r}
+make_consistant <- function(df, ...){
+  # quote variables and save as a list
+  dots <- rlang::quos(...)
+  
+  # we need a temporary counter variable for each variable in our data
+  # we will assume there are no existing variables in the database table starting with underscore
+  tmp <- paste0("_tmp_", 1:length(dots))
+  print(tmp)
+  
+  # create a list of group_by mutate steps that add the counter variables
+  counter_expr <- purrr::map2(dots, tmp, ~list(
+    rlang::expr(group_by(id, !!.x)),
+    rlang::expr(mutate(!!.y := ifelse(is.na(!!.x) | !!.x == "", 0, n())))
+  ))
+  print(counter_expr)
+  
+  # now create the replacement expressions that will assign the most frequent value to each variable
+  replacement_expr <- purrr::map2(dots, tmp,
+    ~rlang::expr(!!rlang::quo_name(.x) := first(!!.x, order_by = desc(!!as.name(.y)))))
+  print(replacement_expr)
+
+  # put it all together using the dplyr list approach
+  final_expr <- list(rlang::expr(df)) %>%
+    c(counter_expr) %>% 
+    c(rlang::expr(ungroup())) %>%
+    c(rlang::expr(group_by(id))) %>%
+    c(rlang::expr(mutate(!!!replacement_expr))) %>%
+    c(rlang::expr(select(-starts_with("_tmp_")))) %>%
+    rlang::flatten() %>% # because we have nested lists we need flatten to create a flat list
+    purrr::reduce(function(a,b) rlang::expr(!!a %>% !!b))
+  print(final_expr)
+  
+  # finally return the evaluated expression
+  rlang::eval_tidy(final_expr)
+}
+
+db2 <- db %>% 
+  make_consistant(letter, number)
+
+db2
+```
+
+Lets take a look at all the SQL code produced by this one R function.
+```{r}
+show_query(db2)
+```
+
+
+# One small change left
+We hard coded the name of the `id` variable. It would be better to allow the user to specify the name of the `id` column. I'm going to ask for a charater string rather than a bare variable name to distinguish this special variable from the rest.
+
+```{r}
+make_consistant <- function(df, across, ...){
+  # allow the user to specify the name of the id variable as a character string
+  stopifnot(is.character(across))
+  across <- as.name(across)
+  
+  # quote variables and save as a list
+  dots <- rlang::quos(...)
+  
+  # we need a temporary counter variable for each variable in our data
+  # we will assume there are no existing variables in the database table starting with underscore
+  tmp <- paste0("_tmp_", 1:length(dots))
+  
+  # create a list of group_by mutate steps that add the counter variables
+  counter_expr <- purrr::map2(dots, tmp, ~list(
+    rlang::expr(group_by(!!across, !!.x)),
+    rlang::expr(mutate(!!.y := ifelse(is.na(!!.x) | !!.x == "", 0, n())))
+  ))
+  
+  # now create the replacement expressions that will assign the most frequent value to each variable
+  replacement_expr <- purrr::map2(dots, tmp,
+    ~rlang::expr(!!rlang::quo_name(.x) := first(!!.x, order_by = desc(!!as.name(.y)))))
+
+  # put it all together using the dplyr list approach
+  final_expr <- list(rlang::expr(df)) %>%
+    c(counter_expr) %>% 
+    c(rlang::expr(ungroup())) %>%
+    c(rlang::expr(group_by(!!across))) %>%
+    c(rlang::expr(mutate(!!!replacement_expr))) %>%
+    c(rlang::expr(select(-starts_with("_tmp_")))) %>%
+    rlang::flatten() %>%
+    purrr::reduce(function(a,b) rlang::expr(!!a %>% !!b))
+  
+  # finally return the evaluated expression
+  rlang::eval_tidy(final_expr)
+}
+```
+
+
+
+Whew that was a lot of work and kind of a mind bender! However now we never need to think about this particular problem again. Whenever I encounter a situation where I need to make one variable consistant across levels of another based on the *mode* function I just add one line to my `dplyr` pipeline.
+
+```{r}
+db %>% 
+  mutate(new_var = "new_var") %>% 
+  make_consistant(across = "id", letter, number, new_var) %>% 
+  distinct()
+```
+
+
+
+# Summary
+
+`dplyr` has been successful because it is easy to use and implements a few powerful ideas:
+- Small composable verb functions that do one thing well
+- Abstract away backend object 
+- Delay computation
+
+Being able to extend `dplyr` with your own verb functions that encapsulate commonly used data manipulations is powerful because it allows you to solve a problem once and then apply that solution as a single line in your code in the future. Writing functions is the first level of this type of logic encapsulation. Creating packages is the next level up and is a topic for another meetup.
+
+To learn more about these ideas and much more check out the book [Advanced R](https://adv-r.hadley.nz/) by Hadley Wickham.
+
+```{r, echo=F}
+DBI::dbDisconnect(con)
+```
+
+
