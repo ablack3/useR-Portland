@@ -11,17 +11,17 @@ output:
 knitr::opts_chunk$set(echo = TRUE, cache = T, warning = F)
 ```
 
-The dplyr package has become a preferred tool for data manipulation for many R users. There are two really innovative ideas implemented by the dplyr package that are making their way into other packages.
+The `dplyr` package has become a preferred tool for data manipulation for many R users. There are two innovative ideas implemented by the dplyr package that are making their way into other packages.
 
 ### Small composable funtions (verbs)
 
-`dplyr` provides a handful of verbs that serve as a language of data manipulation. Each verb is function that does one thing to a dataset and does it very well. Examples are `select`, `filter`, `mutate`, `group_by`, and `summarise`. Other packages being developed in the tidyverse philosphy are adopting this strategy. For example the [tidygraph](https://github.com/thomasp85/tidygraph) package provides verbs similar to dplyr for working with graph data and the [plyranges](https://sa-lee.github.io/plyranges/) package provides verbs for working with genomics data. The underlying object is different in each case but the style of mainpulating the objects by composing verbs with pipes is used by each of these packages.
+`dplyr` provides a handful of verbs that serve as a language of data manipulation. Each verb is function that does one thing to a dataset and does it very well. Examples are `select`, `filter`, `mutate`, `group_by`, and `summarise`. Other packages being developed in the tidyverse philosophy are adopting this strategy. For example the [tidygraph](https://github.com/thomasp85/tidygraph) package provides verbs similar to dplyr for working with graph data and the [plyranges](https://sa-lee.github.io/plyranges/) package provides verbs for working with genomics data. The underlying object is different in each case but the style of manipulating the objects by composing verbs with pipes is used by each of these packages.
 
 
 
 ### Abstracting away the back end and delaying computation
 
-One of the more fantastic things about `dplyr` is that it abstracts away where the data is stored. Your data can be an dataframe in memory, a table in pretty much any SQL database, or even an object in Apache Spark. In all cases the `dplyr` code is the same. Futhermore `dplyr` delays computation until the last possible moment so running `dplyr` code on a database amounts to building up the recipe to get the results you want. The recipe is not executed until the user explicitly asks for the result. For computations on large datasets this can be a really nice feature. I think the `hailr` package (in-development) for parallelized analysis of genomics data will implement this idea as well.
+One of the more fantastic things about `dplyr` is that it abstracts away where the data is stored. Your data can be an dataframe in memory, a table in pretty much any SQL database, or even an object in Apache Spark. In all cases the `dplyr` code is the same. Furthermore `dplyr` delays computation until the last possible moment so running `dplyr` code on a database amounts to building up the recipe to get the results you want. The recipe is not executed until the user explicitly asks for the result. For computations on large datasets this can be a really nice feature. I think the `hailr` package (in-development) for parallelized analysis of genomics data will implement this idea as well.
 
 
 *****
@@ -33,7 +33,7 @@ In this post we will take trip down the rabbit hole of extending `dplyr` by crea
 
 # Problem statement
 
-Sueppose you have a table in a database containing information about some type of entity but it is a bit messy. Each entity has a unique id and some associated attributes all stored in a single table. The trouble is that this data is not normalized. By that I mean that while each entity sould have only one value for each attribute it often happens that there are multiple values in the data, spread across multiple rows. Furthermore there is a lot of missing data in the form of `NA`s or empty strings. Our goal is to normalize the data so that the attribute columns have a consistant value across id. We also want to keep the data in the database since it is very large.
+Suppose you have a table in a database containing information about some type of entity but it is a bit messy. Each entity has a unique id and some associated attributes all stored in a single table. The trouble is that this data is not normalized. By that I mean that while each entity should have only one value for each attribute it often happens that there are multiple values in the data, spread across multiple rows. Furthermore there is a lot of missing data in the form of `NA`s or empty strings. Our goal is to normalize the data so that the attribute columns have a consistent value across id. We also want to keep the data in the database since it is very large.
 
 Let's create some fake data to play with and load it into a postgres database.
 
@@ -59,7 +59,7 @@ db <- copy_to(con, df)
 db
 ```
 
-This data contains two entity ids and two attributes. As you can see this data is messy. Lets assume that each entity should be associated with one and only one value for each attribute. There are multiple ways we could normalize this data but we would like to write a function that will assign the most frequently occuring non-missing (blank or NA) value of each attribute to each entity. This is basically a *mode* function applied to each column within `id`. *Mode* is generally not available in SQL databases and is not actually well defined since there may be ties. We will apply the *"Don't let the perfect be the enemy of the good"* rule and ignore that problem for now. Furthermore we don't want to actually collapse the data since there may be more manipulations we want to perform and some other variables that we do not want to summarise.
+This data contains two entity ids and two attributes. As you can see this data is messy. Lets assume that each entity should be associated with one and only one value for each attribute. There are multiple ways we could normalize this data but we would like to write a function that will assign the most frequently occurring non-missing (blank or NA) value of each attribute to each entity. This is basically a *mode* function applied to each column within `id`. *Mode* is generally not available in SQL databases and is not actually well defined since there may be ties. We will apply the *"Don't let the perfect be the enemy of the good"* rule and ignore that problem for now. Furthermore we don't want to actually collapse the data since there may be more manipulations we want to perform and some other variables that we do not want to summarize.
 
 
 The desired solution looks like this.
@@ -70,7 +70,7 @@ db %>%
 ```
 
 # The basic strategy
-The basic strategy behind this function is to define a temp variable for each column we want to clean up. This temp variable will contain the count of the number of occurances of each value within `id`. It looks like this.
+The basic strategy behind this function is to define a temp variable for each column we want to clean up. This temp variable will contain the count of the number of occurrences of each value within `id`. It looks like this.
 
 ```{r}
 db2 <- db %>%
@@ -150,7 +150,7 @@ print_hello(Dave)
 
 Functions that quote their input are difficult to program with. The `!!` unquoting operator helps us get around the difficulties.
 
-Let's use `!!` to wrap our inital solution in a function.
+Let's use `!!` to wrap our initial solution in a function.
 ```{r}
 make_consistant <- function(df, var){
   var <- rlang::enquo(var)
@@ -168,14 +168,14 @@ db %>%
 
 ```
 
-**Sidebar**: I will punt the discussion of quosures vs. expressions and `enquo` vs `enexpr` for now. The short explanation is that an expression is unevaluated R code. A quosure is an R expression that also contains information about the environment it should be evaluated in. `enexpr` can be used in a function to quote the input and create an expression while `enquo` does the same but creates a quosure instead. I think the rule of thumb is to generally prefer quosures over expressions but if your code works under your various test conditions then you might not need to worry about it too much. **End Sidebar**
+**Sidebar**: I will punt the discussion of quosures vs. expressions and `enquo` vs `enexpr` for now. The short explanation is that an *expression* is unevaluated R code. A *quosure* is an R expression that also contains information about the environment it should be evaluated in. `enexpr` can be used in a function to quote the input and create an expression while `enquo` does the same but creates a quosure instead. I think the rule of thumb is to generally prefer quosures over expressions but if your code works under your various test conditions then you might not need to worry about it too much. **End Sidebar.**
 
 
-We sucessfully encapsulated our variable cleaning logic in a function. However this function only fixes one variable at a time.To handle multiple variables simultaneously we need a couple more new concepts.
+We successfully encapsulated our variable cleaning logic in a function. However this function only fixes one variable at a time. To handle multiple variables simultaneously we need a couple more new concepts.
 
 
 # Using ...
-The `...` (proonounced dot dot dot) argument is a handy way to let the user pass any number of arguments into your function. Any arguments that are not matched by name or position will match the `...` argument.
+The `...` (pronounced dot dot dot) argument is a handy way to let the user pass any number of arguments into your function. Any arguments that are not matched by name or position will match the `...` argument.
 
 Let's start exploring by print out structure of the `...` argument.
 ```{r}
@@ -256,7 +256,7 @@ make_a(db, letter, number)
 
 
 
-Now instead of setting each variable to "a" we will set each to the most commonly occuring non-missing value within each `id`.
+Now instead of setting each variable to "a" we will set each to the most commonly occurring non-missing value within each `id`.
 
 ```{r}
 make_consistant <- function(df, ...){
@@ -308,7 +308,7 @@ show_query(db2)
 
 
 # One small change left
-We hard coded the name of the `id` variable. It would be better to allow the user to specify the name of the `id` column. I'm going to ask for a charater string rather than a bare variable name to distinguish this special variable from the rest.
+We hard coded the name of the `id` variable. It would be better to allow the user to specify the name of the `id` column. I'm going to ask for a character string rather than a bare variable name to distinguish this special variable from the rest.
 
 ```{r}
 make_consistant <- function(df, across, ...){
@@ -350,7 +350,7 @@ make_consistant <- function(df, across, ...){
 
 
 
-Whew that was a lot of work and kind of a mind bender! However now we never need to think about this particular problem again. Whenever I encounter a situation where I need to make one variable consistant across levels of another based on the *mode* function I just add one line to my `dplyr` pipeline.
+Whew that was a lot of work and kind of a mind bender! However now we never need to think about this particular problem again. Whenever I encounter a situation where I need to make one variable consistent across levels of another based on the *mode* function I just add one line to my `dplyr` pipeline.
 
 ```{r}
 db %>% 
@@ -365,7 +365,7 @@ db %>%
 
 `dplyr` has been successful because it is easy to use and implements a few powerful ideas:
 - Small composable verb functions that do one thing well
-- Abstract away backend object 
+- Abstract away back-end object 
 - Delay computation
 
 Being able to extend `dplyr` with your own verb functions that encapsulate commonly used data manipulations is powerful because it allows you to solve a problem once and then apply that solution as a single line in your code in the future. Writing functions is the first level of this type of logic encapsulation. Creating packages is the next level up and is a topic for another meetup.

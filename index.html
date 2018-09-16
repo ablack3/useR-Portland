@@ -77,20 +77,20 @@ code > span.in { color: #60a0b0; font-weight: bold; font-style: italic; } /* Inf
 
 
 <section class="main-content">
-<p>The dplyr package has become a preferred tool for data manipulation for many R users. There are two really innovative ideas implemented by the dplyr package that are making their way into other packages.</p>
+<p>The <code>dplyr</code> package has become a preferred tool for data manipulation for many R users. There are two innovative ideas implemented by the dplyr package that are making their way into other packages.</p>
 <div id="small-composable-funtions-verbs" class="section level3">
 <h3>Small composable funtions (verbs)</h3>
-<p><code>dplyr</code> provides a handful of verbs that serve as a language of data manipulation. Each verb is function that does one thing to a dataset and does it very well. Examples are <code>select</code>, <code>filter</code>, <code>mutate</code>, <code>group_by</code>, and <code>summarise</code>. Other packages being developed in the tidyverse philosphy are adopting this strategy. For example the <a href="https://github.com/thomasp85/tidygraph">tidygraph</a> package provides verbs similar to dplyr for working with graph data and the <a href="https://sa-lee.github.io/plyranges/">plyranges</a> package provides verbs for working with genomics data. The underlying object is different in each case but the style of mainpulating the objects by composing verbs with pipes is used by each of these packages.</p>
+<p><code>dplyr</code> provides a handful of verbs that serve as a language of data manipulation. Each verb is function that does one thing to a dataset and does it very well. Examples are <code>select</code>, <code>filter</code>, <code>mutate</code>, <code>group_by</code>, and <code>summarise</code>. Other packages being developed in the tidyverse philosophy are adopting this strategy. For example the <a href="https://github.com/thomasp85/tidygraph">tidygraph</a> package provides verbs similar to dplyr for working with graph data and the <a href="https://sa-lee.github.io/plyranges/">plyranges</a> package provides verbs for working with genomics data. The underlying object is different in each case but the style of manipulating the objects by composing verbs with pipes is used by each of these packages.</p>
 </div>
 <div id="abstracting-away-the-back-end-and-delaying-computation" class="section level3">
 <h3>Abstracting away the back end and delaying computation</h3>
-<p>One of the more fantastic things about <code>dplyr</code> is that it abstracts away where the data is stored. Your data can be an dataframe in memory, a table in pretty much any SQL database, or even an object in Apache Spark. In all cases the <code>dplyr</code> code is the same. Futhermore <code>dplyr</code> delays computation until the last possible moment so running <code>dplyr</code> code on a database amounts to building up the recipe to get the results you want. The recipe is not executed until the user explicitly asks for the result. For computations on large datasets this can be a really nice feature. I think the <code>hailr</code> package (in-development) for parallelized analysis of genomics data will implement this idea as well.</p>
+<p>One of the more fantastic things about <code>dplyr</code> is that it abstracts away where the data is stored. Your data can be an dataframe in memory, a table in pretty much any SQL database, or even an object in Apache Spark. In all cases the <code>dplyr</code> code is the same. Furthermore <code>dplyr</code> delays computation until the last possible moment so running <code>dplyr</code> code on a database amounts to building up the recipe to get the results you want. The recipe is not executed until the user explicitly asks for the result. For computations on large datasets this can be a really nice feature. I think the <code>hailr</code> package (in-development) for parallelized analysis of genomics data will implement this idea as well.</p>
 <hr />
 <p>In this post we will take trip down the rabbit hole of extending <code>dplyr</code> by creating a function we can use in a pipeline to solve a data cleaning problem. In the process we will explore some advanced programming concepts in R and learn some powerful techniques for extending <code>dplyr</code>.</p>
 </div>
 <div id="problem-statement" class="section level1">
 <h1>Problem statement</h1>
-<p>Sueppose you have a table in a database containing information about some type of entity but it is a bit messy. Each entity has a unique id and some associated attributes all stored in a single table. The trouble is that this data is not normalized. By that I mean that while each entity sould have only one value for each attribute it often happens that there are multiple values in the data, spread across multiple rows. Furthermore there is a lot of missing data in the form of <code>NA</code>s or empty strings. Our goal is to normalize the data so that the attribute columns have a consistant value across id. We also want to keep the data in the database since it is very large.</p>
+<p>Suppose you have a table in a database containing information about some type of entity but it is a bit messy. Each entity has a unique id and some associated attributes all stored in a single table. The trouble is that this data is not normalized. By that I mean that while each entity should have only one value for each attribute it often happens that there are multiple values in the data, spread across multiple rows. Furthermore there is a lot of missing data in the form of <code>NA</code>s or empty strings. Our goal is to normalize the data so that the attribute columns have a consistent value across id. We also want to keep the data in the database since it is very large.</p>
 <p>Let’s create some fake data to play with and load it into a postgres database.</p>
 <div class="sourceCode"><pre class="sourceCode r"><code class="sourceCode r"><span class="kw">library</span>(dplyr)
 
@@ -122,7 +122,7 @@ db</code></pre></div>
 ## 5     1 b      &lt;NA&gt;  
 ## 6     2 c      9     
 ## 7     2 &lt;NA&gt;   &lt;NA&gt;</code></pre>
-<p>This data contains two entity ids and two attributes. As you can see this data is messy. Lets assume that each entity should be associated with one and only one value for each attribute. There are multiple ways we could normalize this data but we would like to write a function that will assign the most frequently occuring non-missing (blank or NA) value of each attribute to each entity. This is basically a <em>mode</em> function applied to each column within <code>id</code>. <em>Mode</em> is generally not available in SQL databases and is not actually well defined since there may be ties. We will apply the <em>“Don’t let the perfect be the enemy of the good”</em> rule and ignore that problem for now. Furthermore we don’t want to actually collapse the data since there may be more manipulations we want to perform and some other variables that we do not want to summarise.</p>
+<p>This data contains two entity ids and two attributes. As you can see this data is messy. Lets assume that each entity should be associated with one and only one value for each attribute. There are multiple ways we could normalize this data but we would like to write a function that will assign the most frequently occurring non-missing (blank or NA) value of each attribute to each entity. This is basically a <em>mode</em> function applied to each column within <code>id</code>. <em>Mode</em> is generally not available in SQL databases and is not actually well defined since there may be ties. We will apply the <em>“Don’t let the perfect be the enemy of the good”</em> rule and ignore that problem for now. Furthermore we don’t want to actually collapse the data since there may be more manipulations we want to perform and some other variables that we do not want to summarize.</p>
 <p>The desired solution looks like this.</p>
 <div class="sourceCode"><pre class="sourceCode r"><code class="sourceCode r"><span class="kw">source</span>(<span class="st">&quot;variable_consistancy.R&quot;</span>)
 db <span class="op">%&gt;%</span><span class="st"> </span>
@@ -142,7 +142,7 @@ db <span class="op">%&gt;%</span><span class="st"> </span>
 </div>
 <div id="the-basic-strategy" class="section level1">
 <h1>The basic strategy</h1>
-<p>The basic strategy behind this function is to define a temp variable for each column we want to clean up. This temp variable will contain the count of the number of occurances of each value within <code>id</code>. It looks like this.</p>
+<p>The basic strategy behind this function is to define a temp variable for each column we want to clean up. This temp variable will contain the count of the number of occurrences of each value within <code>id</code>. It looks like this.</p>
 <div class="sourceCode"><pre class="sourceCode r"><code class="sourceCode r">db2 &lt;-<span class="st"> </span>db <span class="op">%&gt;%</span>
 <span class="st">  </span><span class="kw">group_by</span>(id, letter) <span class="op">%&gt;%</span><span class="st"> </span>
 <span class="st">  </span><span class="kw">mutate</span>(<span class="dt">letter_count =</span> <span class="kw">ifelse</span>(<span class="kw">is.na</span>(letter) <span class="op">|</span><span class="st"> </span>letter <span class="op">==</span><span class="st"> &quot;&quot;</span>, <span class="dv">0</span>, <span class="kw">n</span>())) <span class="op">%&gt;%</span><span class="st"> </span>
@@ -210,7 +210,7 @@ ten</code></pre></div>
 <span class="kw">print_hello</span>(Dave)</code></pre></div>
 <pre><code>## Hello Dave</code></pre>
 <p>Functions that quote their input are difficult to program with. The <code>!!</code> unquoting operator helps us get around the difficulties.</p>
-<p>Let’s use <code>!!</code> to wrap our inital solution in a function.</p>
+<p>Let’s use <code>!!</code> to wrap our initial solution in a function.</p>
 <div class="sourceCode"><pre class="sourceCode r"><code class="sourceCode r">make_consistant &lt;-<span class="st"> </span><span class="cf">function</span>(df, var){
   var &lt;-<span class="st"> </span>rlang<span class="op">::</span><span class="kw">enquo</span>(var)
   db <span class="op">%&gt;%</span>
@@ -236,13 +236,13 @@ db <span class="op">%&gt;%</span><span class="st"> </span>
 ## 5     1 a      1     
 ## 6     2 c      9     
 ## 7     2 c      &lt;NA&gt;</code></pre>
-<p><strong>Sidebar</strong>: I will punt the discussion of quosures vs. expressions and <code>enquo</code> vs <code>enexpr</code> for now. The short explanation is that an expression is unevaluated R code. A quosure is an R expression that also contains information about the environment it should be evaluated in. <code>enexpr</code> can be used in a function to quote the input and create an expression while <code>enquo</code> does the same but creates a quosure instead. I think the rule of thumb is to generally prefer quosures over expressions but if your code works under your various test conditions then you might not need to worry about it too much. <strong>End Sidebar</strong></p>
-<p>We sucessfully encapsulated our variable cleaning logic in a function. However this function only fixes one variable at a time.To handle multiple variables simultaneously we need a couple more new concepts.</p>
+<p><strong>Sidebar</strong>: I will punt the discussion of quosures vs. expressions and <code>enquo</code> vs <code>enexpr</code> for now. The short explanation is that an <em>expression</em> is unevaluated R code. A <em>quosure</em> is an R expression that also contains information about the environment it should be evaluated in. <code>enexpr</code> can be used in a function to quote the input and create an expression while <code>enquo</code> does the same but creates a quosure instead. I think the rule of thumb is to generally prefer quosures over expressions but if your code works under your various test conditions then you might not need to worry about it too much. <strong>End Sidebar.</strong></p>
+<p>We successfully encapsulated our variable cleaning logic in a function. However this function only fixes one variable at a time. To handle multiple variables simultaneously we need a couple more new concepts.</p>
 </div>
 </div>
 <div id="using" class="section level1">
 <h1>Using …</h1>
-<p>The <code>...</code> (proonounced dot dot dot) argument is a handy way to let the user pass any number of arguments into your function. Any arguments that are not matched by name or position will match the <code>...</code> argument.</p>
+<p>The <code>...</code> (pronounced dot dot dot) argument is a handy way to let the user pass any number of arguments into your function. Any arguments that are not matched by name or position will match the <code>...</code> argument.</p>
 <p>Let’s start exploring by print out structure of the <code>...</code> argument.</p>
 <div class="sourceCode"><pre class="sourceCode r"><code class="sourceCode r">dot_fun &lt;-<span class="st"> </span><span class="cf">function</span>(...){
   <span class="kw">str</span>(<span class="kw">list</span>(...))
@@ -355,7 +355,7 @@ dplyr_expr</code></pre></div>
 ## 5     1 a      a     
 ## 6     2 a      a     
 ## 7     2 a      a</code></pre>
-<p>Now instead of setting each variable to “a” we will set each to the most commonly occuring non-missing value within each <code>id</code>.</p>
+<p>Now instead of setting each variable to “a” we will set each to the most commonly occurring non-missing value within each <code>id</code>.</p>
 <div class="sourceCode"><pre class="sourceCode r"><code class="sourceCode r">make_consistant &lt;-<span class="st"> </span><span class="cf">function</span>(df, ...){
   <span class="co"># quote variables and save as a list</span>
   dots &lt;-<span class="st"> </span>rlang<span class="op">::</span><span class="kw">quos</span>(...)
@@ -449,7 +449,7 @@ db2 &lt;-<span class="st"> </span>db <span class="op">%&gt;%</span><span class="
 </div>
 <div id="one-small-change-left" class="section level1">
 <h1>One small change left</h1>
-<p>We hard coded the name of the <code>id</code> variable. It would be better to allow the user to specify the name of the <code>id</code> column. I’m going to ask for a charater string rather than a bare variable name to distinguish this special variable from the rest.</p>
+<p>We hard coded the name of the <code>id</code> variable. It would be better to allow the user to specify the name of the <code>id</code> column. I’m going to ask for a character string rather than a bare variable name to distinguish this special variable from the rest.</p>
 <div class="sourceCode"><pre class="sourceCode r"><code class="sourceCode r">make_consistant &lt;-<span class="st"> </span><span class="cf">function</span>(df, across, ...){
   <span class="co"># allow the user to specify the name of the id variable as a character string</span>
   <span class="kw">stopifnot</span>(<span class="kw">is.character</span>(across))
@@ -485,7 +485,7 @@ db2 &lt;-<span class="st"> </span>db <span class="op">%&gt;%</span><span class="
   <span class="co"># finally return the evaluated expression</span>
   rlang<span class="op">::</span><span class="kw">eval_tidy</span>(final_expr)
 }</code></pre></div>
-<p>Whew that was a lot of work and kind of a mind bender! However now we never need to think about this particular problem again. Whenever I encounter a situation where I need to make one variable consistant across levels of another based on the <em>mode</em> function I just add one line to my <code>dplyr</code> pipeline.</p>
+<p>Whew that was a lot of work and kind of a mind bender! However now we never need to think about this particular problem again. Whenever I encounter a situation where I need to make one variable consistent across levels of another based on the <em>mode</em> function I just add one line to my <code>dplyr</code> pipeline.</p>
 <div class="sourceCode"><pre class="sourceCode r"><code class="sourceCode r">db <span class="op">%&gt;%</span><span class="st"> </span>
 <span class="st">  </span><span class="kw">mutate</span>(<span class="dt">new_var =</span> <span class="st">&quot;new_var&quot;</span>) <span class="op">%&gt;%</span><span class="st"> </span>
 <span class="st">  </span><span class="kw">make_consistant</span>(<span class="dt">across =</span> <span class="st">&quot;id&quot;</span>, letter, number, new_var) <span class="op">%&gt;%</span><span class="st"> </span>
@@ -500,7 +500,7 @@ db2 &lt;-<span class="st"> </span>db <span class="op">%&gt;%</span><span class="
 </div>
 <div id="summary" class="section level1">
 <h1>Summary</h1>
-<p><code>dplyr</code> has been successful because it is easy to use and implements a few powerful ideas: - Small composable verb functions that do one thing well - Abstract away backend object - Delay computation</p>
+<p><code>dplyr</code> has been successful because it is easy to use and implements a few powerful ideas: - Small composable verb functions that do one thing well - Abstract away back-end object - Delay computation</p>
 <p>Being able to extend <code>dplyr</code> with your own verb functions that encapsulate commonly used data manipulations is powerful because it allows you to solve a problem once and then apply that solution as a single line in your code in the future. Writing functions is the first level of this type of logic encapsulation. Creating packages is the next level up and is a topic for another meetup.</p>
 <p>To learn more about these ideas and much more check out the book <a href="https://adv-r.hadley.nz/">Advanced R</a> by Hadley Wickham.</p>
 </div>
