@@ -87,27 +87,3 @@ make_consistant <- function(df,  ..., across){
   df_out <- rlang::eval_tidy(final_expr)
   return(df_out)
 }
-
-
-#' Check the consistancy of a claim level variable
-#'
-#' @param mc_subset A subset of medical claims
-#' @param variable Bare variable name to check. Should be a claim level header level variable.
-#'
-#' @return A frequency table
-#' @export
-#'
-#' @examples
-#' mc %>%
-#' check_claim_variable_consistancy(billtype)
-check_claim_variable_consistancy <- function(mc_subset, variable){
-  variable <- rlang::enquo(variable)
-
-  mc_subset %>%
-    distinct(mhdo_claim, !!variable) %>%
-    count(mhdo_claim) %>%
-    ungroup() %>%
-    count(n) %>%
-    mutate(pct = round(nn/sum(nn, na.rm = TRUE), 3), cumpct = order_by(n, cumsum(pct))) %>%
-    arrange(n)
-}
