@@ -8,7 +8,7 @@ output:
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE, cache = T, warning = F)
+knitr::opts_chunk$set(echo = TRUE, cache = F, warning = F)
 ```
 
 The `dplyr` package has become a preferred tool for data manipulation for many R users. There are two innovative ideas implemented by the dplyr package that are making their way into other packages.
@@ -64,9 +64,9 @@ This data contains two entity ids and two attributes. As you can see this data i
 
 The desired solution looks like this.
 ```{r}
-source("variable_consistancy.R")
+source("variable_consistency.R")
 db %>% 
-  make_consistant(across = "id", letter, number)
+  make_consistent(across = "id", letter, number)
 ```
 
 # The basic strategy
@@ -152,7 +152,7 @@ Functions that quote their input are difficult to program with. The `!!` unquoti
 
 Let's use `!!` to wrap our initial solution in a function.
 ```{r}
-make_consistant <- function(df, var){
+make_consistent <- function(df, var){
   var <- rlang::enquo(var)
   db %>%
     group_by(id, !!var) %>% 
@@ -164,7 +164,7 @@ make_consistant <- function(df, var){
 }
 
 db %>% 
-  make_consistant(letter)
+  make_consistent(letter)
 
 ```
 
@@ -259,7 +259,7 @@ make_a(db, letter, number)
 Now instead of setting each variable to "a" we will set each to the most commonly occurring non-missing value within each `id`.
 
 ```{r}
-make_consistant <- function(df, ...){
+make_consistent <- function(df, ...){
   # quote variables and save as a list
   dots <- rlang::quos(...)
   
@@ -296,7 +296,7 @@ make_consistant <- function(df, ...){
 }
 
 db2 <- db %>% 
-  make_consistant(letter, number)
+  make_consistent(letter, number)
 
 db2
 ```
@@ -311,7 +311,7 @@ show_query(db2)
 We hard coded the name of the `id` variable. It would be better to allow the user to specify the name of the `id` column. I'm going to ask for a character string rather than a bare variable name to distinguish this special variable from the rest.
 
 ```{r}
-make_consistant <- function(df, across, ...){
+make_consistent <- function(df, across, ...){
   # allow the user to specify the name of the id variable as a character string
   stopifnot(is.character(across))
   across <- as.name(across)
@@ -355,7 +355,7 @@ Whew that was a lot of work and kind of a mind bender! However now we never need
 ```{r}
 db %>% 
   mutate(new_var = "new_var") %>% 
-  make_consistant(across = "id", letter, number, new_var) %>% 
+  make_consistent(across = "id", letter, number, new_var) %>% 
   distinct()
 ```
 

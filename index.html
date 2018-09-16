@@ -92,9 +92,16 @@ code > span.in { color: #60a0b0; font-weight: bold; font-style: italic; } /* Inf
 <h1>Problem statement</h1>
 <p>Suppose you have a table in a database containing information about some type of entity but it is a bit messy. Each entity has a unique id and some associated attributes all stored in a single table. The trouble is that this data is not normalized. By that I mean that while each entity should have only one value for each attribute it often happens that there are multiple values in the data, spread across multiple rows. Furthermore there is a lot of missing data in the form of <code>NA</code>s or empty strings. Our goal is to normalize the data so that the attribute columns have a consistent value across id. We also want to keep the data in the database since it is very large.</p>
 <p>Let’s create some fake data to play with and load it into a postgres database.</p>
-<div class="sourceCode"><pre class="sourceCode r"><code class="sourceCode r"><span class="kw">library</span>(dplyr)
-
-df &lt;-<span class="st"> </span>tibble<span class="op">::</span><span class="kw">tribble</span>(
+<div class="sourceCode"><pre class="sourceCode r"><code class="sourceCode r"><span class="kw">library</span>(dplyr)</code></pre></div>
+<pre><code>## 
+## Attaching package: 'dplyr'</code></pre>
+<pre><code>## The following objects are masked from 'package:stats':
+## 
+##     filter, lag</code></pre>
+<pre><code>## The following objects are masked from 'package:base':
+## 
+##     intersect, setdiff, setequal, union</code></pre>
+<div class="sourceCode"><pre class="sourceCode r"><code class="sourceCode r">df &lt;-<span class="st"> </span>tibble<span class="op">::</span><span class="kw">tribble</span>(
   <span class="op">~</span>id, <span class="op">~</span>letter, <span class="op">~</span>number,
   <span class="dv">1</span>, <span class="st">&quot;a&quot;</span>,  <span class="ot">NA</span>,
   <span class="dv">1</span>, <span class="st">&quot;a&quot;</span>, <span class="st">&quot;1&quot;</span>,
@@ -104,8 +111,9 @@ df &lt;-<span class="st"> </span>tibble<span class="op">::</span><span class="kw
   <span class="dv">2</span>, <span class="st">&quot;c&quot;</span>, <span class="st">&quot;9&quot;</span>,
   <span class="dv">2</span>,  <span class="ot">NA</span>,  <span class="ot">NA</span>)
 
-<span class="kw">library</span>(RPostgreSQL)
-con &lt;-<span class="st"> </span>DBI<span class="op">::</span><span class="kw">dbConnect</span>(DBI<span class="op">::</span><span class="kw">dbDriver</span>(<span class="st">&quot;PostgreSQL&quot;</span>), <span class="dt">dbname =</span> <span class="st">&quot;postgres&quot;</span>,
+<span class="kw">library</span>(RPostgreSQL)</code></pre></div>
+<pre><code>## Loading required package: DBI</code></pre>
+<div class="sourceCode"><pre class="sourceCode r"><code class="sourceCode r">con &lt;-<span class="st"> </span>DBI<span class="op">::</span><span class="kw">dbConnect</span>(DBI<span class="op">::</span><span class="kw">dbDriver</span>(<span class="st">&quot;PostgreSQL&quot;</span>), <span class="dt">dbname =</span> <span class="st">&quot;postgres&quot;</span>,
                  <span class="dt">host =</span> <span class="st">&quot;localhost&quot;</span>, <span class="dt">port =</span> <span class="dv">5432</span>,
                  <span class="dt">user =</span> <span class="st">&quot;postgres&quot;</span>, <span class="dt">password =</span> keyring<span class="op">::</span><span class="kw">key_get</span>(<span class="dt">service =</span> <span class="st">&quot;postgres&quot;</span>, <span class="dt">username =</span> <span class="st">&quot;postgres&quot;</span>))
 
@@ -124,9 +132,9 @@ db</code></pre></div>
 ## 7     2 &lt;NA&gt;   &lt;NA&gt;</code></pre>
 <p>This data contains two entity ids and two attributes. As you can see this data is messy. Lets assume that each entity should be associated with one and only one value for each attribute. There are multiple ways we could normalize this data but we would like to write a function that will assign the most frequently occurring non-missing (blank or NA) value of each attribute to each entity. This is basically a <em>mode</em> function applied to each column within <code>id</code>. <em>Mode</em> is generally not available in SQL databases and is not actually well defined since there may be ties. We will apply the <em>“Don’t let the perfect be the enemy of the good”</em> rule and ignore that problem for now. Furthermore we don’t want to actually collapse the data since there may be more manipulations we want to perform and some other variables that we do not want to summarize.</p>
 <p>The desired solution looks like this.</p>
-<div class="sourceCode"><pre class="sourceCode r"><code class="sourceCode r"><span class="kw">source</span>(<span class="st">&quot;variable_consistancy.R&quot;</span>)
+<div class="sourceCode"><pre class="sourceCode r"><code class="sourceCode r"><span class="kw">source</span>(<span class="st">&quot;variable_consistency.R&quot;</span>)
 db <span class="op">%&gt;%</span><span class="st"> </span>
-<span class="st">  </span><span class="kw">make_consistant</span>(<span class="dt">across =</span> <span class="st">&quot;id&quot;</span>, letter, number)</code></pre></div>
+<span class="st">  </span><span class="kw">make_consistent</span>(<span class="dt">across =</span> <span class="st">&quot;id&quot;</span>, letter, number)</code></pre></div>
 <pre><code>## # Source:   lazy query [?? x 3]
 ## # Database: postgres 10.0.5 [postgres@localhost:5432/postgres]
 ## # Groups:   id
@@ -171,7 +179,7 @@ db2</code></pre></div>
 ## SELECT &quot;id&quot;, &quot;letter&quot;, &quot;number&quot;, &quot;letter_count&quot;, &quot;number_count&quot;, first_value(&quot;letter&quot;) OVER (PARTITION BY &quot;id&quot; ORDER BY &quot;letter_count&quot; DESC) AS &quot;new_letter&quot;, first_value(&quot;number&quot;) OVER (PARTITION BY &quot;id&quot; ORDER BY &quot;number_count&quot; DESC) AS &quot;new_number&quot;
 ## FROM (SELECT &quot;id&quot;, &quot;letter&quot;, &quot;number&quot;, &quot;letter_count&quot;, CASE WHEN (((&quot;number&quot;) IS NULL) OR &quot;number&quot; = '') THEN (0.0) WHEN NOT(((&quot;number&quot;) IS NULL) OR &quot;number&quot; = '') THEN (COUNT(*) OVER (PARTITION BY &quot;id&quot;, &quot;number&quot;)) END AS &quot;number_count&quot;
 ## FROM (SELECT &quot;id&quot;, &quot;letter&quot;, &quot;number&quot;, CASE WHEN (((&quot;letter&quot;) IS NULL) OR &quot;letter&quot; = '') THEN (0.0) WHEN NOT(((&quot;letter&quot;) IS NULL) OR &quot;letter&quot; = '') THEN (COUNT(*) OVER (PARTITION BY &quot;id&quot;, &quot;letter&quot;)) END AS &quot;letter_count&quot;
-## FROM &quot;df&quot;) &quot;gtxwdypjil&quot;) &quot;chbvzvlaey&quot;</code></pre>
+## FROM &quot;df&quot;) &quot;nzkcziiqom&quot;) &quot;zvxepulqqi&quot;</code></pre>
 <p>To get our desired result we just need to drop the temporary columns and overwrite the old data with the new data. However this only solves our problem in this specific case and we would like a function that we can throw into any <code>dplyr</code> pipeline.</p>
 </div>
 <div id="concepts" class="section level1">
@@ -211,7 +219,7 @@ ten</code></pre></div>
 <pre><code>## Hello Dave</code></pre>
 <p>Functions that quote their input are difficult to program with. The <code>!!</code> unquoting operator helps us get around the difficulties.</p>
 <p>Let’s use <code>!!</code> to wrap our initial solution in a function.</p>
-<div class="sourceCode"><pre class="sourceCode r"><code class="sourceCode r">make_consistant &lt;-<span class="st"> </span><span class="cf">function</span>(df, var){
+<div class="sourceCode"><pre class="sourceCode r"><code class="sourceCode r">make_consistent &lt;-<span class="st"> </span><span class="cf">function</span>(df, var){
   var &lt;-<span class="st"> </span>rlang<span class="op">::</span><span class="kw">enquo</span>(var)
   db <span class="op">%&gt;%</span>
 <span class="st">    </span><span class="kw">group_by</span>(id, <span class="op">!!</span>var) <span class="op">%&gt;%</span><span class="st"> </span>
@@ -223,7 +231,7 @@ ten</code></pre></div>
 }
 
 db <span class="op">%&gt;%</span><span class="st"> </span>
-<span class="st">  </span><span class="kw">make_consistant</span>(letter)</code></pre></div>
+<span class="st">  </span><span class="kw">make_consistent</span>(letter)</code></pre></div>
 <pre><code>## # Source:   lazy query [?? x 3]
 ## # Database: postgres 10.0.5 [postgres@localhost:5432/postgres]
 ## # Groups:   id
@@ -356,7 +364,7 @@ dplyr_expr</code></pre></div>
 ## 6     2 a      a     
 ## 7     2 a      a</code></pre>
 <p>Now instead of setting each variable to “a” we will set each to the most commonly occurring non-missing value within each <code>id</code>.</p>
-<div class="sourceCode"><pre class="sourceCode r"><code class="sourceCode r">make_consistant &lt;-<span class="st"> </span><span class="cf">function</span>(df, ...){
+<div class="sourceCode"><pre class="sourceCode r"><code class="sourceCode r">make_consistent &lt;-<span class="st"> </span><span class="cf">function</span>(df, ...){
   <span class="co"># quote variables and save as a list</span>
   dots &lt;-<span class="st"> </span>rlang<span class="op">::</span><span class="kw">quos</span>(...)
   
@@ -393,7 +401,7 @@ dplyr_expr</code></pre></div>
 }
 
 db2 &lt;-<span class="st"> </span>db <span class="op">%&gt;%</span><span class="st"> </span>
-<span class="st">  </span><span class="kw">make_consistant</span>(letter, number)</code></pre></div>
+<span class="st">  </span><span class="kw">make_consistent</span>(letter, number)</code></pre></div>
 <pre><code>## [1] &quot;_tmp_1&quot; &quot;_tmp_2&quot;
 ## [[1]]
 ## [[1]][[1]]
@@ -445,12 +453,12 @@ db2 &lt;-<span class="st"> </span>db <span class="op">%&gt;%</span><span class="
 ## FROM (SELECT &quot;id&quot;, first_value(&quot;letter&quot;) OVER (PARTITION BY &quot;id&quot; ORDER BY &quot;_tmp_1&quot; DESC) AS &quot;letter&quot;, first_value(&quot;number&quot;) OVER (PARTITION BY &quot;id&quot; ORDER BY &quot;_tmp_2&quot; DESC) AS &quot;number&quot;, &quot;_tmp_1&quot;, &quot;_tmp_2&quot;
 ## FROM (SELECT &quot;id&quot;, &quot;letter&quot;, &quot;number&quot;, &quot;_tmp_1&quot;, CASE WHEN (((&quot;number&quot;) IS NULL) OR &quot;number&quot; = '') THEN (0.0) WHEN NOT(((&quot;number&quot;) IS NULL) OR &quot;number&quot; = '') THEN (COUNT(*) OVER (PARTITION BY &quot;id&quot;, &quot;number&quot;)) END AS &quot;_tmp_2&quot;
 ## FROM (SELECT &quot;id&quot;, &quot;letter&quot;, &quot;number&quot;, CASE WHEN (((&quot;letter&quot;) IS NULL) OR &quot;letter&quot; = '') THEN (0.0) WHEN NOT(((&quot;letter&quot;) IS NULL) OR &quot;letter&quot; = '') THEN (COUNT(*) OVER (PARTITION BY &quot;id&quot;, &quot;letter&quot;)) END AS &quot;_tmp_1&quot;
-## FROM &quot;df&quot;) &quot;ulhkmitnhw&quot;) &quot;czwftzptlt&quot;) &quot;gujffzqwjt&quot;</code></pre>
+## FROM &quot;df&quot;) &quot;ukautlgyjj&quot;) &quot;mawozbioaj&quot;) &quot;wnyztjrdww&quot;</code></pre>
 </div>
 <div id="one-small-change-left" class="section level1">
 <h1>One small change left</h1>
 <p>We hard coded the name of the <code>id</code> variable. It would be better to allow the user to specify the name of the <code>id</code> column. I’m going to ask for a character string rather than a bare variable name to distinguish this special variable from the rest.</p>
-<div class="sourceCode"><pre class="sourceCode r"><code class="sourceCode r">make_consistant &lt;-<span class="st"> </span><span class="cf">function</span>(df, across, ...){
+<div class="sourceCode"><pre class="sourceCode r"><code class="sourceCode r">make_consistent &lt;-<span class="st"> </span><span class="cf">function</span>(df, across, ...){
   <span class="co"># allow the user to specify the name of the id variable as a character string</span>
   <span class="kw">stopifnot</span>(<span class="kw">is.character</span>(across))
   across &lt;-<span class="st"> </span><span class="kw">as.name</span>(across)
@@ -488,7 +496,7 @@ db2 &lt;-<span class="st"> </span>db <span class="op">%&gt;%</span><span class="
 <p>Whew that was a lot of work and kind of a mind bender! However now we never need to think about this particular problem again. Whenever I encounter a situation where I need to make one variable consistent across levels of another based on the <em>mode</em> function I just add one line to my <code>dplyr</code> pipeline.</p>
 <div class="sourceCode"><pre class="sourceCode r"><code class="sourceCode r">db <span class="op">%&gt;%</span><span class="st"> </span>
 <span class="st">  </span><span class="kw">mutate</span>(<span class="dt">new_var =</span> <span class="st">&quot;new_var&quot;</span>) <span class="op">%&gt;%</span><span class="st"> </span>
-<span class="st">  </span><span class="kw">make_consistant</span>(<span class="dt">across =</span> <span class="st">&quot;id&quot;</span>, letter, number, new_var) <span class="op">%&gt;%</span><span class="st"> </span>
+<span class="st">  </span><span class="kw">make_consistent</span>(<span class="dt">across =</span> <span class="st">&quot;id&quot;</span>, letter, number, new_var) <span class="op">%&gt;%</span><span class="st"> </span>
 <span class="st">  </span><span class="kw">distinct</span>()</code></pre></div>
 <pre><code>## # Source:   lazy query [?? x 4]
 ## # Database: postgres 10.0.5 [postgres@localhost:5432/postgres]
