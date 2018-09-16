@@ -4,7 +4,7 @@ author: "Adam Black"
 date: "`r Sys.Date()`"
 output:
   prettydoc::html_pretty:
-    theme: flatly
+    theme: cayman
 ---
 
 ```{r setup, include=FALSE}
@@ -372,7 +372,7 @@ Being able to extend `dplyr` with your own verb functions that encapsulate commo
 
 To learn more about these ideas and much more check out the book [Advanced R](https://adv-r.hadley.nz/) by Hadley Wickham.
 
-```{r, echo=F}
+```{r, echo=F, include=F}
 DBI::dbDisconnect(con)
 ```
 
