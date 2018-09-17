@@ -80,11 +80,11 @@ code > span.in { color: #60a0b0; font-weight: bold; font-style: italic; } /* Inf
 <p>The <code>dplyr</code> package has become a preferred tool for data manipulation for many R users. There are two innovative ideas implemented by the dplyr package that are making their way into other packages.</p>
 <div id="small-composable-funtions-verbs" class="section level3">
 <h3>Small composable funtions (verbs)</h3>
-<p><code>dplyr</code> provides a handful of verbs that serve as a language of data manipulation. Each verb is function that does one thing to a dataset and does it very well. Examples are <code>select</code>, <code>filter</code>, <code>mutate</code>, <code>group_by</code>, and <code>summarise</code>. Other packages being developed in the tidyverse philosophy are adopting this strategy. For example the <a href="https://github.com/thomasp85/tidygraph">tidygraph</a> package provides verbs similar to dplyr for working with graph data and the <a href="https://sa-lee.github.io/plyranges/">plyranges</a> package provides verbs for working with genomics data. The underlying object is different in each case but the style of manipulating the objects by composing verbs with pipes is used by each of these packages.</p>
+<p><code>dplyr</code> provides a handful of verbs that serve as a language of data manipulation. Each verb is function that does one thing to a dataset and does it very well. Examples are <code>select</code>, <code>filter</code>, <code>mutate</code>, <code>group_by</code>, and <code>summarise</code>. Other packages being developed with the tidyverse philosophy are adopting this strategy. For example the <a href="https://github.com/thomasp85/tidygraph">tidygraph</a> package provides verbs similar to dplyr for working with graph data and the <a href="https://sa-lee.github.io/plyranges/">plyranges</a> package provides verbs for working with genomics data. The underlying object is different in each case but the style of manipulating the objects by composing verbs with pipes is used by each of these packages.</p>
 </div>
 <div id="abstracting-away-the-back-end-and-delaying-computation" class="section level3">
 <h3>Abstracting away the back end and delaying computation</h3>
-<p>One of the more fantastic things about <code>dplyr</code> is that it abstracts away where the data is stored. Your data can be an dataframe in memory, a table in pretty much any SQL database, or even an object in Apache Spark. In all cases the <code>dplyr</code> code is the same. Furthermore <code>dplyr</code> delays computation until the last possible moment so running <code>dplyr</code> code on a database amounts to building up the recipe to get the results you want. The recipe is not executed until the user explicitly asks for the result. For computations on large datasets this can be a really nice feature. I think the <code>hailr</code> package (in-development) for parallelized analysis of genomics data will implement this idea as well.</p>
+<p>One of the more fantastic things about <code>dplyr</code> is that it abstracts away where the data is stored. Your data can be a dataframe in memory, a table in pretty much any SQL database, or even an object in Apache Spark. In all cases the <code>dplyr</code> code is the same. Furthermore <code>dplyr</code> delays computation until the last possible moment so running <code>dplyr</code> code on a database amounts to building up the recipe to get the results you want. The recipe is not executed until the user explicitly asks for the result. For computations on large datasets this can be a really nice feature. I think the <code>hailr</code> package (in-development) for parallelized analysis of genomics data will implement this idea as well.</p>
 <hr />
 <p>In this post we will take trip down the rabbit hole of extending <code>dplyr</code> by creating a function we can use in a pipeline to solve a data cleaning problem. In the process we will explore some advanced programming concepts in R and learn some powerful techniques for extending <code>dplyr</code>.</p>
 </div>
@@ -92,16 +92,9 @@ code > span.in { color: #60a0b0; font-weight: bold; font-style: italic; } /* Inf
 <h1>Problem statement</h1>
 <p>Suppose you have a table in a database containing information about some type of entity but it is a bit messy. Each entity has a unique id and some associated attributes all stored in a single table. The trouble is that this data is not normalized. By that I mean that while each entity should have only one value for each attribute it often happens that there are multiple values in the data, spread across multiple rows. Furthermore there is a lot of missing data in the form of <code>NA</code>s or empty strings. Our goal is to normalize the data so that the attribute columns have a consistent value across id. We also want to keep the data in the database since it is very large.</p>
 <p>Let’s create some fake data to play with and load it into a postgres database.</p>
-<div class="sourceCode"><pre class="sourceCode r"><code class="sourceCode r"><span class="kw">library</span>(dplyr)</code></pre></div>
-<pre><code>## 
-## Attaching package: 'dplyr'</code></pre>
-<pre><code>## The following objects are masked from 'package:stats':
-## 
-##     filter, lag</code></pre>
-<pre><code>## The following objects are masked from 'package:base':
-## 
-##     intersect, setdiff, setequal, union</code></pre>
-<div class="sourceCode"><pre class="sourceCode r"><code class="sourceCode r">df &lt;-<span class="st"> </span>tibble<span class="op">::</span><span class="kw">tribble</span>(
+<div class="sourceCode"><pre class="sourceCode r"><code class="sourceCode r"><span class="kw">library</span>(dplyr)
+
+df &lt;-<span class="st"> </span>tibble<span class="op">::</span><span class="kw">tribble</span>(
   <span class="op">~</span>id, <span class="op">~</span>letter, <span class="op">~</span>number,
   <span class="dv">1</span>, <span class="st">&quot;a&quot;</span>,  <span class="ot">NA</span>,
   <span class="dv">1</span>, <span class="st">&quot;a&quot;</span>, <span class="st">&quot;1&quot;</span>,
@@ -111,11 +104,13 @@ code > span.in { color: #60a0b0; font-weight: bold; font-style: italic; } /* Inf
   <span class="dv">2</span>, <span class="st">&quot;c&quot;</span>, <span class="st">&quot;9&quot;</span>,
   <span class="dv">2</span>,  <span class="ot">NA</span>,  <span class="ot">NA</span>)
 
-<span class="kw">library</span>(RPostgreSQL)</code></pre></div>
-<pre><code>## Loading required package: DBI</code></pre>
-<div class="sourceCode"><pre class="sourceCode r"><code class="sourceCode r">con &lt;-<span class="st"> </span>DBI<span class="op">::</span><span class="kw">dbConnect</span>(DBI<span class="op">::</span><span class="kw">dbDriver</span>(<span class="st">&quot;PostgreSQL&quot;</span>), <span class="dt">dbname =</span> <span class="st">&quot;postgres&quot;</span>,
-                 <span class="dt">host =</span> <span class="st">&quot;localhost&quot;</span>, <span class="dt">port =</span> <span class="dv">5432</span>,
-                 <span class="dt">user =</span> <span class="st">&quot;postgres&quot;</span>, <span class="dt">password =</span> keyring<span class="op">::</span><span class="kw">key_get</span>(<span class="dt">service =</span> <span class="st">&quot;postgres&quot;</span>, <span class="dt">username =</span> <span class="st">&quot;postgres&quot;</span>))
+<span class="kw">library</span>(RPostgreSQL)
+con &lt;-<span class="st"> </span>DBI<span class="op">::</span><span class="kw">dbConnect</span>(DBI<span class="op">::</span><span class="kw">dbDriver</span>(<span class="st">&quot;PostgreSQL&quot;</span>), 
+                      <span class="dt">dbname =</span> <span class="st">&quot;postgres&quot;</span>,
+                      <span class="dt">host =</span> <span class="st">&quot;localhost&quot;</span>, 
+                      <span class="dt">port =</span> <span class="dv">5432</span>,
+                      <span class="dt">user =</span> <span class="st">&quot;postgres&quot;</span>, 
+                      <span class="dt">password =</span> keyring<span class="op">::</span><span class="kw">key_get</span>(<span class="dt">service =</span> <span class="st">&quot;postgres&quot;</span>, <span class="dt">username =</span> <span class="st">&quot;postgres&quot;</span>))
 
 db &lt;-<span class="st"> </span><span class="kw">copy_to</span>(con, df)
 db</code></pre></div>
@@ -130,7 +125,7 @@ db</code></pre></div>
 ## 5     1 b      &lt;NA&gt;  
 ## 6     2 c      9     
 ## 7     2 &lt;NA&gt;   &lt;NA&gt;</code></pre>
-<p>This data contains two entity ids and two attributes. As you can see this data is messy. Lets assume that each entity should be associated with one and only one value for each attribute. There are multiple ways we could normalize this data but we would like to write a function that will assign the most frequently occurring non-missing (blank or NA) value of each attribute to each entity. This is basically a <em>mode</em> function applied to each column within <code>id</code>. <em>Mode</em> is generally not available in SQL databases and is not actually well defined since there may be ties. We will apply the <em>“Don’t let the perfect be the enemy of the good”</em> rule and ignore that problem for now. Furthermore we don’t want to actually collapse the data since there may be more manipulations we want to perform and some other variables that we do not want to summarize.</p>
+<p>This data contains two entity ids and two attributes. As you can see this data is messy. Lets assume that each entity should be associated with one and only one value for each attribute. There are multiple ways we could normalize this data but we would like to write a function that will assign the most frequently occurring non-missing (blank or NA) value of each attribute to each entity. This is basically a <em>mode</em> function applied to each column within <code>id</code>. <em>Mode</em> is generally not available in SQL databases and is not actually well defined since there may be ties. We will apply the <em>“Don’t let the perfect be the enemy of the good”</em> rule and ignore the problem of ties for now. Furthermore we don’t want to actually collapse the data since there may be more manipulations we want to perform and some other variables that we do not want to summarize.</p>
 <p>The desired solution looks like this.</p>
 <div class="sourceCode"><pre class="sourceCode r"><code class="sourceCode r"><span class="kw">source</span>(<span class="st">&quot;variable_consistency.R&quot;</span>)
 db <span class="op">%&gt;%</span><span class="st"> </span>
@@ -150,7 +145,7 @@ db <span class="op">%&gt;%</span><span class="st"> </span>
 </div>
 <div id="the-basic-strategy" class="section level1">
 <h1>The basic strategy</h1>
-<p>The basic strategy behind this function is to define a temp variable for each column we want to clean up. This temp variable will contain the count of the number of occurrences of each value within <code>id</code>. It looks like this.</p>
+<p>The basic strategy behind this function is to define a temp variable for each column we want to clean up. This temp variable will contain the count of the number of occurrences of each non-missing value within <code>id</code>. Missing values (blanks and <code>NA</code>s) will always get a count of zero. The <code>dplyr</code> code looks like this.</p>
 <div class="sourceCode"><pre class="sourceCode r"><code class="sourceCode r">db2 &lt;-<span class="st"> </span>db <span class="op">%&gt;%</span>
 <span class="st">  </span><span class="kw">group_by</span>(id, letter) <span class="op">%&gt;%</span><span class="st"> </span>
 <span class="st">  </span><span class="kw">mutate</span>(<span class="dt">letter_count =</span> <span class="kw">ifelse</span>(<span class="kw">is.na</span>(letter) <span class="op">|</span><span class="st"> </span>letter <span class="op">==</span><span class="st"> &quot;&quot;</span>, <span class="dv">0</span>, <span class="kw">n</span>())) <span class="op">%&gt;%</span><span class="st"> </span>
@@ -179,35 +174,36 @@ db2</code></pre></div>
 ## SELECT &quot;id&quot;, &quot;letter&quot;, &quot;number&quot;, &quot;letter_count&quot;, &quot;number_count&quot;, first_value(&quot;letter&quot;) OVER (PARTITION BY &quot;id&quot; ORDER BY &quot;letter_count&quot; DESC) AS &quot;new_letter&quot;, first_value(&quot;number&quot;) OVER (PARTITION BY &quot;id&quot; ORDER BY &quot;number_count&quot; DESC) AS &quot;new_number&quot;
 ## FROM (SELECT &quot;id&quot;, &quot;letter&quot;, &quot;number&quot;, &quot;letter_count&quot;, CASE WHEN (((&quot;number&quot;) IS NULL) OR &quot;number&quot; = '') THEN (0.0) WHEN NOT(((&quot;number&quot;) IS NULL) OR &quot;number&quot; = '') THEN (COUNT(*) OVER (PARTITION BY &quot;id&quot;, &quot;number&quot;)) END AS &quot;number_count&quot;
 ## FROM (SELECT &quot;id&quot;, &quot;letter&quot;, &quot;number&quot;, CASE WHEN (((&quot;letter&quot;) IS NULL) OR &quot;letter&quot; = '') THEN (0.0) WHEN NOT(((&quot;letter&quot;) IS NULL) OR &quot;letter&quot; = '') THEN (COUNT(*) OVER (PARTITION BY &quot;id&quot;, &quot;letter&quot;)) END AS &quot;letter_count&quot;
-## FROM &quot;df&quot;) &quot;nzkcziiqom&quot;) &quot;zvxepulqqi&quot;</code></pre>
-<p>To get our desired result we just need to drop the temporary columns and overwrite the old data with the new data. However this only solves our problem in this specific case and we would like a function that we can throw into any <code>dplyr</code> pipeline.</p>
+## FROM &quot;df&quot;) &quot;ndznwavhxh&quot;) &quot;byrktiqvyg&quot;</code></pre>
+<p>To get our desired result we just need to drop the two <code>count</code> columns and overwrite the <code>letter</code> and <code>number</code> columns with <code>letter_new</code> and <code>number_new</code> respectively. However this only solves our problem in this specific case and we would like a function that we can throw into any <code>dplyr</code> pipeline.</p>
 </div>
 <div id="concepts" class="section level1">
 <h1>Concepts</h1>
-<p>To encapsulate this logic into into a function we will need to introduce a few R programming concepts. The first is programming with dplyr which involves the idea of unquoting. If you are new to this idea you should read the (vignette)[<a href="https://cran.r-project.org/web/packages/dplyr/vignettes/programming.html" class="uri">https://cran.r-project.org/web/packages/dplyr/vignettes/programming.html</a>].</p>
+<p>To encapsulate this logic into into a function we will need to introduce a few R programming concepts. The first is programming with dplyr which involves the idea of unquoting. If you are new to this idea you should read the <a href="https://cran.r-project.org/web/packages/dplyr/vignettes/programming.html">vignette</a>.</p>
 <div id="non-standard-evaluation" class="section level2">
 <h2>Non-standard evaluation</h2>
-<p>To introduce the idea let’s look at <code>glue</code>. It is a function to create strings similar to <code>paste</code> in base R.</p>
+<p>To introduce the idea let’s look at <code>glue</code>. It is a function that creates strings similar to <code>paste</code> in base R.</p>
 <div class="sourceCode"><pre class="sourceCode r"><code class="sourceCode r">name &lt;-<span class="st"> &quot;Adam&quot;</span>
 glue<span class="op">::</span><span class="kw">glue</span>(<span class="st">&quot;Hi my name is {name}&quot;</span>)</code></pre></div>
 <pre><code>## Hi my name is Adam</code></pre>
-<p>The characters in the curly braces are interpreted differently than the other characters. The braces tell the glue function to <strong>unquote</strong> (i.e. evaluate) whatever is inside.</p>
+<p>The characters in the curly braces are interpreted differently than the other characters. The braces tell the <code>glue</code> function to <strong>unquote</strong> (i.e. evaluate) whatever is inside.</p>
 <div class="sourceCode"><pre class="sourceCode r"><code class="sourceCode r">glue<span class="op">::</span><span class="kw">glue</span>(<span class="st">&quot;The square root of pi is approximately {sqrt(pi)}&quot;</span>)</code></pre></div>
 <pre><code>## The square root of pi is approximately 1.77245385090552</code></pre>
-<p>In similar fashion we can build R expressions.</p>
+<p>We can build R expressions in a similar fashion.</p>
 <div class="sourceCode"><pre class="sourceCode r"><code class="sourceCode r">four &lt;-<span class="st"> </span><span class="dv">4</span>
 ten &lt;-<span class="st"> </span>rlang<span class="op">::</span><span class="kw">expr</span>(<span class="dv">1</span> <span class="op">+</span><span class="st"> </span><span class="dv">2</span> <span class="op">+</span><span class="st"> </span><span class="dv">3</span> <span class="op">+</span><span class="st"> </span><span class="op">!!</span>four)
 ten</code></pre></div>
 <pre><code>## 1 + 2 + 3 + 4</code></pre>
-<p>The <code>!!</code> symbol acts similar to the <code>{}</code> in the glue function.</p>
+<p>The <code>!!</code> symbol in ther <code>expr</code> function is analogous to the <code>{}</code> in the <code>glue</code> function.</p>
 <p>Then we can manually evaluate an expression.</p>
 <div class="sourceCode"><pre class="sourceCode r"><code class="sourceCode r">rlang<span class="op">::</span><span class="kw">eval_tidy</span>(ten)</code></pre></div>
 <pre><code>## [1] 10</code></pre>
 <p>In R you can write functions that quote their arguments, capturing the expression and then evaluating it in a non-standard way. This gives R functions the ability to handle their arguments in any way they like.</p>
+<p>For example, consider the following code.</p>
 <div class="sourceCode"><pre class="sourceCode r"><code class="sourceCode r">x &lt;-<span class="st"> </span><span class="dv">1</span><span class="op">:</span><span class="dv">4</span>
 <span class="kw">plot</span>(x, x<span class="op">^</span><span class="dv">2</span>)</code></pre></div>
 <p><img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAqAAAAHgCAMAAABNUi8GAAACu1BMVEUAAAABAQECAgIDAwMEBAQFBQUGBgYHBwcICAgJCQkKCgoLCwsMDAwNDQ0ODg4PDw8QEBARERESEhITExMUFBQVFRUWFhYXFxcYGBgZGRkaGhobGxscHBwdHR0eHh4fHx8gICAhISEiIiIjIyMkJCQlJSUmJiYnJycoKCgpKSkqKiorKyssLCwtLS0uLi4vLy8wMDAxMTEyMjIzMzM0NDQ1NTU2NjY3Nzc4ODg5OTk6Ojo7Ozs8PDw9PT0+Pj4/Pz9AQEBBQUFDQ0NFRUVGRkZHR0dISEhJSUlLS0tMTExNTU1OTk5PT09RUVFSUlJTU1NUVFRVVVVWVlZXV1dYWFhZWVlaWlpbW1tcXFxdXV1eXl5fX19gYGBhYWFiYmJjY2NkZGRlZWVmZmZnZ2doaGhqampra2tsbGxtbW1ubm5wcHBxcXFycnJ0dHR1dXV2dnZ3d3d4eHh6enp7e3t8fHx9fX1/f3+AgICBgYGCgoKEhISFhYWGhoaHh4eIiIiJiYmKioqLi4uNjY2QkJCRkZGSkpKUlJSVlZWWlpaXl5eYmJiZmZmampqbm5ucnJyenp6fn5+goKChoaGioqKjo6OkpKSmpqanp6eoqKiqqqqrq6usrKytra2urq6vr6+wsLCxsbGysrKzs7O1tbW2tra3t7e4uLi5ubm7u7u8vLy9vb2+vr6/v7/AwMDBwcHDw8PExMTFxcXGxsbHx8fIyMjJycnKysrLy8vMzMzNzc3Ozs7Pz8/Q0NDR0dHS0tLT09PU1NTW1tbX19fY2NjZ2dna2trb29vc3Nze3t7f39/g4ODh4eHi4uLj4+Pk5OTl5eXn5+fo6Ojp6enq6urr6+vs7Ozt7e3u7u7v7+/w8PDx8fHy8vLz8/P09PT19fX29vb39/f4+Pj5+fn6+vr7+/v8/Pz9/f3+/v7///+qowpqAAAACXBIWXMAAA7DAAAOwwHHb6hkAAAOYklEQVR4nO3d/2NVdR3H8eNsg8sXB2KOL85CMYYipmBgKor5pUI0S01RcZiFgKv4YgWk81tGkKKCYTqU5ItSMxHNgKxQCAOhAhEQpbENts+f0f2yC7vj3nXOPZ/Pzutyn48fzj27O/uc9+U+uWP3js0zgDAv6gGAzhAopBEopBEopBEopBEopBEopBEopBEopBEopBEopBEopBEopBEopBEopBEopBEopBEopBEopBEopBEopBEopBEopBEopBEopBEopBEopBEopBEopBEopBEopBEopBEopBEopBEopBEopBEopBEopBEopBEopBEopBEopBEopBEopBEopBEopBEopBEopBEopBEopBEopBEopBEopBEopBEopBEopBEopBEopBEopBEopBEopBEopBEopBEopBEopBEopBEopBEopBEopBEopBEopBEopBEopBEopBEopBEopBEopFkO9P6RgA+X7Yom0DFPrwf+v3P+GlGgb9ldDyeoEQQKZQQKaQQKaQQKaQQKFQ3ZnlEiUGj4y9iep/f/ZUvHqwkUEjZVLG4x710ys+P1BAoJtzye2O7ps6/D9QQKCUO2JC+u/EOH6wkUEoa+l7y47I8dridQSJg0N7HdcepnHa4nUEj4Z//afc2/P/fRjtcTKDRsu7lv7KK6464mUMg4nOU6AoU0AoU0AoU0AoU0AoU0p4F+svW4b05JI1D44ijQ6teN2TPe88rn5ziAQOGLo0C9BcZM6PfY6gfKXsh+AIHCF3eB7vNeie/MHJ39AAKFL+4C3eAdjO+s7JX9AAKFL+4C3Vu6Ob5TOyj7AQQKX1wFWnH1lKHXGrPmjLuzH0Cg8MVRoHW1k8dVxozpPmp39gMIFL64fB60Mf4ImvlE6NqjP7Ss9Mng66EIde0rSc0b0j+0rAeBwo+oXursRaDwg0AhzVGgNcdkP4BA4YujQKf18CqHpGQ/gEDhi6tP8Su8TZ2+n0Dhi6tAW3sSKCxw9kXSsv2dvptA4QtfxUMagUIagUIagUIagUIagUIagUIagUIagUIagUIagUIagUIagUIagUIagUIagUIagUIagUIagUIagUIagUIagUIagUIagUIagUIagUIagUIagUIagUIagUIagUIagUIagUIagUIagUIagUIagUIagUIagUIagUIagUIagUIagUIagUIagUIagUIagUIagUIagUIagUIagUIagUIagUIagUIagUIagUIagUIagUIagUIagUIagUIagUIagUIagUIagUIagUIagUIagUIagUIagUIagUIagUIagUIagUIagUIagUKaw0CPfHQ49zsJFL64CvTd6v4lXkn/SbmWJ1D44ijQN2JVMxYsXTD7gti67AcQ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" /><!-- --></p>
-<p>Notice the y axis is labeled x^2 which is the expression I passed in. The <code>plot</code> function quoted that input and used it to both calculate the y variable and label the y axis.</p>
+<p>Notice the y axis is labeled x^2 which is the expression I passed in. The <code>plot</code> function quoted that input and used it to both calculate the y variable and label the y axis. Pretty slick.</p>
 <p><code>dplyr</code> uses this technique heavily to evaluate arguments like variable names in the context of the associated dataframe, generally passed in as the first argument of a verb function.</p>
 <p>This <code>print_hello</code> function quotes its input similar to dplyr functions.</p>
 <div class="sourceCode"><pre class="sourceCode r"><code class="sourceCode r">print_hello &lt;-<span class="st"> </span><span class="cf">function</span>(name){
@@ -244,14 +240,15 @@ db <span class="op">%&gt;%</span><span class="st"> </span>
 ## 5     1 a      1     
 ## 6     2 c      9     
 ## 7     2 c      &lt;NA&gt;</code></pre>
-<p><strong>Sidebar</strong>: I will punt the discussion of quosures vs. expressions and <code>enquo</code> vs <code>enexpr</code> for now. The short explanation is that an <em>expression</em> is unevaluated R code. A <em>quosure</em> is an R expression that also contains information about the environment it should be evaluated in. <code>enexpr</code> can be used in a function to quote the input and create an expression while <code>enquo</code> does the same but creates a quosure instead. I think the rule of thumb is to generally prefer quosures over expressions but if your code works under your various test conditions then you might not need to worry about it too much. <strong>End Sidebar.</strong></p>
+<p>Not bad.</p>
+<p><strong>Sidebar</strong>: I will punt the discussion of quosures vs. expressions and <code>enquo</code> vs <code>enexpr</code> for now. The short explanation is that an <em>expression</em> is unevaluated R code and a <em>quosure</em> is an R expression that also contains information about the environment it should be evaluated in. <code>enexpr</code> can be used in a function to quote the input and create an expression while <code>enquo</code> does the same thing but creates a quosure instead. I think the rule of thumb is to generally prefer quosures over expressions but if your code works under your various test conditions then you might not need to worry about it too much. <strong>End Sidebar.</strong></p>
 <p>We successfully encapsulated our variable cleaning logic in a function. However this function only fixes one variable at a time. To handle multiple variables simultaneously we need a couple more new concepts.</p>
 </div>
 </div>
 <div id="using" class="section level1">
 <h1>Using …</h1>
 <p>The <code>...</code> (pronounced dot dot dot) argument is a handy way to let the user pass any number of arguments into your function. Any arguments that are not matched by name or position will match the <code>...</code> argument.</p>
-<p>Let’s start exploring by print out structure of the <code>...</code> argument.</p>
+<p>Let’s start exploring by printing out structure of the <code>...</code> argument.</p>
 <div class="sourceCode"><pre class="sourceCode r"><code class="sourceCode r">dot_fun &lt;-<span class="st"> </span><span class="cf">function</span>(...){
   <span class="kw">str</span>(<span class="kw">list</span>(...))
 }
@@ -320,7 +317,7 @@ dplyr_expr</code></pre></div>
 </div>
 <div id="putting-these-ideas-together" class="section level1">
 <h1>Putting these ideas together</h1>
-<p>For each variable change it to an “a”.</p>
+<p>Let’s create a function that changes each selected variable to an “a”.</p>
 <div class="sourceCode"><pre class="sourceCode r"><code class="sourceCode r">make_a &lt;-<span class="st"> </span><span class="cf">function</span>(df,  ...){ 
   <span class="co"># save arguments as a quoted list</span>
   dots &lt;-<span class="st"> </span>rlang<span class="op">::</span><span class="kw">quos</span>(...)
@@ -453,7 +450,7 @@ db2 &lt;-<span class="st"> </span>db <span class="op">%&gt;%</span><span class="
 ## FROM (SELECT &quot;id&quot;, first_value(&quot;letter&quot;) OVER (PARTITION BY &quot;id&quot; ORDER BY &quot;_tmp_1&quot; DESC) AS &quot;letter&quot;, first_value(&quot;number&quot;) OVER (PARTITION BY &quot;id&quot; ORDER BY &quot;_tmp_2&quot; DESC) AS &quot;number&quot;, &quot;_tmp_1&quot;, &quot;_tmp_2&quot;
 ## FROM (SELECT &quot;id&quot;, &quot;letter&quot;, &quot;number&quot;, &quot;_tmp_1&quot;, CASE WHEN (((&quot;number&quot;) IS NULL) OR &quot;number&quot; = '') THEN (0.0) WHEN NOT(((&quot;number&quot;) IS NULL) OR &quot;number&quot; = '') THEN (COUNT(*) OVER (PARTITION BY &quot;id&quot;, &quot;number&quot;)) END AS &quot;_tmp_2&quot;
 ## FROM (SELECT &quot;id&quot;, &quot;letter&quot;, &quot;number&quot;, CASE WHEN (((&quot;letter&quot;) IS NULL) OR &quot;letter&quot; = '') THEN (0.0) WHEN NOT(((&quot;letter&quot;) IS NULL) OR &quot;letter&quot; = '') THEN (COUNT(*) OVER (PARTITION BY &quot;id&quot;, &quot;letter&quot;)) END AS &quot;_tmp_1&quot;
-## FROM &quot;df&quot;) &quot;ukautlgyjj&quot;) &quot;mawozbioaj&quot;) &quot;wnyztjrdww&quot;</code></pre>
+## FROM &quot;df&quot;) &quot;xxyfambbfh&quot;) &quot;pagwforwir&quot;) &quot;jkrcxmyoer&quot;</code></pre>
 </div>
 <div id="one-small-change-left" class="section level1">
 <h1>One small change left</h1>
@@ -508,8 +505,13 @@ db2 &lt;-<span class="st"> </span>db <span class="op">%&gt;%</span><span class="
 </div>
 <div id="summary" class="section level1">
 <h1>Summary</h1>
-<p><code>dplyr</code> has been successful because it is easy to use and implements a few powerful ideas: - Small composable verb functions that do one thing well - Abstract away back-end object - Delay computation</p>
-<p>Being able to extend <code>dplyr</code> with your own verb functions that encapsulate commonly used data manipulations is powerful because it allows you to solve a problem once and then apply that solution as a single line in your code in the future. Writing functions is the first level of this type of logic encapsulation. Creating packages is the next level up and is a topic for another meetup.</p>
+<p><code>dplyr</code> has been successful because it is easy to use and implements a few powerful ideas:</p>
+<ul>
+<li>Small composable verb functions</li>
+<li>Abstraction of back-end object</li>
+<li>Delayed computation</li>
+</ul>
+<p>Being able to extend <code>dplyr</code> with your own verb functions that encapsulate commonly used data manipulations is powerful because it allows you to solve a problem once and then apply that solution as a single line in your code in the future. Writing functions is the first level of this type of logic encapsulation. Creating packages is the next level up but is a topic for another meetup.</p>
 <p>To learn more about these ideas and much more check out the book <a href="https://adv-r.hadley.nz/">Advanced R</a> by Hadley Wickham.</p>
 </div>
 </section>
