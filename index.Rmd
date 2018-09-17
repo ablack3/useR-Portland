@@ -375,9 +375,9 @@ db %>%
 - Abstraction of back-end object 
 - Delayed computation
 
-Being able to extend `dplyr` with your own verb functions that encapsulate commonly used data manipulations is powerful because it allows you to solve a problem once and then apply that solution as a single line in your code in the future. Writing functions is the first level of this type of logic encapsulation. Creating packages is the next level up but is a topic for another meetup.
+Being able to extend `dplyr` with your own verb functions that encapsulate commonly used data manipulations is powerful because it allows you to solve a problem once and then apply that solution as a single line in your code in the future. Writing functions is the first level of this type of logic encapsulation. Creating packages is the next level up, but that is a topic for another meetup.
 
-To learn more about these ideas and much more check out the book [Advanced R](https://adv-r.hadley.nz/) by Hadley Wickham.
+To learn about more about these and other cool R programming ideas check out the book [Advanced R](https://adv-r.hadley.nz/) by Hadley Wickham.
 
 ```{r, echo=F, include=F}
 DBI::dbDisconnect(con)

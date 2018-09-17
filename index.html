@@ -12,7 +12,7 @@
 
 <meta name="author" content="Adam Black" />
 
-<meta name="date" content="2018-09-16" />
+<meta name="date" content="2018-09-17" />
 
 <title>Exploring some advanced R programming concepts with dplyr</title>
 
@@ -71,7 +71,7 @@ code > span.in { color: #60a0b0; font-weight: bold; font-style: italic; } /* Inf
 <section class="page-header">
 <h1 class="title toc-ignore project-name">Exploring some advanced R programming concepts with dplyr</h1>
 <h4 class="author project-author">Adam Black</h4>
-<h4 class="date project-date">2018-09-16</h4>
+<h4 class="date project-date">2018-09-17</h4>
 </section>
 
 
@@ -174,7 +174,7 @@ db2</code></pre></div>
 ## SELECT &quot;id&quot;, &quot;letter&quot;, &quot;number&quot;, &quot;letter_count&quot;, &quot;number_count&quot;, first_value(&quot;letter&quot;) OVER (PARTITION BY &quot;id&quot; ORDER BY &quot;letter_count&quot; DESC) AS &quot;new_letter&quot;, first_value(&quot;number&quot;) OVER (PARTITION BY &quot;id&quot; ORDER BY &quot;number_count&quot; DESC) AS &quot;new_number&quot;
 ## FROM (SELECT &quot;id&quot;, &quot;letter&quot;, &quot;number&quot;, &quot;letter_count&quot;, CASE WHEN (((&quot;number&quot;) IS NULL) OR &quot;number&quot; = '') THEN (0.0) WHEN NOT(((&quot;number&quot;) IS NULL) OR &quot;number&quot; = '') THEN (COUNT(*) OVER (PARTITION BY &quot;id&quot;, &quot;number&quot;)) END AS &quot;number_count&quot;
 ## FROM (SELECT &quot;id&quot;, &quot;letter&quot;, &quot;number&quot;, CASE WHEN (((&quot;letter&quot;) IS NULL) OR &quot;letter&quot; = '') THEN (0.0) WHEN NOT(((&quot;letter&quot;) IS NULL) OR &quot;letter&quot; = '') THEN (COUNT(*) OVER (PARTITION BY &quot;id&quot;, &quot;letter&quot;)) END AS &quot;letter_count&quot;
-## FROM &quot;df&quot;) &quot;ndznwavhxh&quot;) &quot;byrktiqvyg&quot;</code></pre>
+## FROM &quot;df&quot;) &quot;inetcctmyi&quot;) &quot;kxzdarxqph&quot;</code></pre>
 <p>To get our desired result we just need to drop the two <code>count</code> columns and overwrite the <code>letter</code> and <code>number</code> columns with <code>letter_new</code> and <code>number_new</code> respectively. However this only solves our problem in this specific case and we would like a function that we can throw into any <code>dplyr</code> pipeline.</p>
 </div>
 <div id="concepts" class="section level1">
@@ -450,7 +450,7 @@ db2 &lt;-<span class="st"> </span>db <span class="op">%&gt;%</span><span class="
 ## FROM (SELECT &quot;id&quot;, first_value(&quot;letter&quot;) OVER (PARTITION BY &quot;id&quot; ORDER BY &quot;_tmp_1&quot; DESC) AS &quot;letter&quot;, first_value(&quot;number&quot;) OVER (PARTITION BY &quot;id&quot; ORDER BY &quot;_tmp_2&quot; DESC) AS &quot;number&quot;, &quot;_tmp_1&quot;, &quot;_tmp_2&quot;
 ## FROM (SELECT &quot;id&quot;, &quot;letter&quot;, &quot;number&quot;, &quot;_tmp_1&quot;, CASE WHEN (((&quot;number&quot;) IS NULL) OR &quot;number&quot; = '') THEN (0.0) WHEN NOT(((&quot;number&quot;) IS NULL) OR &quot;number&quot; = '') THEN (COUNT(*) OVER (PARTITION BY &quot;id&quot;, &quot;number&quot;)) END AS &quot;_tmp_2&quot;
 ## FROM (SELECT &quot;id&quot;, &quot;letter&quot;, &quot;number&quot;, CASE WHEN (((&quot;letter&quot;) IS NULL) OR &quot;letter&quot; = '') THEN (0.0) WHEN NOT(((&quot;letter&quot;) IS NULL) OR &quot;letter&quot; = '') THEN (COUNT(*) OVER (PARTITION BY &quot;id&quot;, &quot;letter&quot;)) END AS &quot;_tmp_1&quot;
-## FROM &quot;df&quot;) &quot;xxyfambbfh&quot;) &quot;pagwforwir&quot;) &quot;jkrcxmyoer&quot;</code></pre>
+## FROM &quot;df&quot;) &quot;wbyujqflur&quot;) &quot;pagajkfaun&quot;) &quot;dyekutmwyi&quot;</code></pre>
 </div>
 <div id="one-small-change-left" class="section level1">
 <h1>One small change left</h1>
@@ -511,8 +511,8 @@ db2 &lt;-<span class="st"> </span>db <span class="op">%&gt;%</span><span class="
 <li>Abstraction of back-end object</li>
 <li>Delayed computation</li>
 </ul>
-<p>Being able to extend <code>dplyr</code> with your own verb functions that encapsulate commonly used data manipulations is powerful because it allows you to solve a problem once and then apply that solution as a single line in your code in the future. Writing functions is the first level of this type of logic encapsulation. Creating packages is the next level up but is a topic for another meetup.</p>
-<p>To learn more about these ideas and much more check out the book <a href="https://adv-r.hadley.nz/">Advanced R</a> by Hadley Wickham.</p>
+<p>Being able to extend <code>dplyr</code> with your own verb functions that encapsulate commonly used data manipulations is powerful because it allows you to solve a problem once and then apply that solution as a single line in your code in the future. Writing functions is the first level of this type of logic encapsulation. Creating packages is the next level up, but that is a topic for another meetup.</p>
+<p>To learn about more about these and other cool R programming ideas check out the book <a href="https://adv-r.hadley.nz/">Advanced R</a> by Hadley Wickham.</p>
 </div>
 </section>
 
