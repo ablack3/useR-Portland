@@ -119,7 +119,7 @@ four <- 4
 ten <- rlang::expr(1 + 2 + 3 + !!four)
 ten
 ```
-The `!!` symbol in ther `expr` function is analogous to the `{}` in the `glue` function.
+The `!!` symbol in the `expr` function is analogous to the `{}` in the `glue` function.
 
 Then we can manually evaluate an expression.
 ```{r}
@@ -158,7 +158,7 @@ Let's use `!!` to wrap our initial solution in a function.
 ```{r}
 make_consistent <- function(df, var){
   var <- rlang::enquo(var)
-  db %>%
+  df %>%
     group_by(id, !!var) %>% 
     mutate(tmp_count = ifelse(is.na(!!var) | !!var == "", 0, n())) %>% 
     ungroup() %>% 
